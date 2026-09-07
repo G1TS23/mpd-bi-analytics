@@ -12,6 +12,9 @@ prefixe du nom de fichier distingue les deux tables (un fichier par slice) :
 Lecture ensuite : pyarrow.dataset, pandas, polars, DuckDB (`read_parquet(
 '<out>/playlist_tracks-*.parquet')`), Spark...
 
+Barre de progression (temps ecoule / restant / debit) via `tqdm` s'il est
+installe, sinon repli maison ; masquee si la sortie n'est pas un terminal.
+
     python db/json_to_parquet_arrow.py                 # -> db/parquet_arrow/
     python db/json_to_parquet_arrow.py --out /tmp/pq --workers 8 --level 1
     python db/json_to_parquet_arrow.py -n 200          # echantillon
@@ -19,6 +22,7 @@ Lecture ensuite : pyarrow.dataset, pandas, polars, DuckDB (`read_parquet(
 import argparse
 import glob
 import os
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 
@@ -35,6 +39,43 @@ except ModuleNotFoundError:
 
     def loads(b):
         return _j.loads(b)
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = None
+
+
+class _Bar:
+    """Repli minimal si tqdm est absent : ecoule / restant / debit."""
+
+    def __init__(self, total, unit_bytes):
+        self.total, self.unit_bytes = total, unit_bytes
+        self.n = self.done_bytes = 0
+        self.t0 = time.perf_counter()
+        self.tty = sys.stderr.isatty()
+
+    def update(self, n=1, nbytes=0):
+        self.n += n
+        self.done_bytes += nbytes
+        if not self.tty:
+            return
+        el = time.perf_counter() - self.t0
+        rate = self.n / el if el else 0
+        eta = (self.total - self.n) / rate if rate else 0
+        frac = self.n / self.total
+        bar = ("#" * int(frac * 28)).ljust(28)
+        mbs = self.done_bytes / 1e6 / el if el else 0
+        sys.stderr.write(
+            f"\r[{bar}] {self.n:>4}/{self.total}  "
+            f"ecoule {el:5.1f}s  restant ~{eta:4.1f}s  {mbs:4.0f} Mo/s"
+        )
+        sys.stderr.flush()
+
+    def close(self):
+        if self.tty:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
 
 # ---- schemas figes (evite l'inference, garantit des parts homogenes) --------
 PLAYLIST_SCHEMA = pa.schema([
@@ -145,13 +186,32 @@ def main():
 
     print(f"{len(files)} slices | {bytes_in/1e9:.1f} Go JSON | {workers} workers | "
           f"zstd niveau {args.level} | parseur {_j.__name__}")
+
+    sizes = [os.path.getsize(f) for f in files]
+    if tqdm:
+        bar = tqdm(
+            total=len(files), desc="JSON->Parquet", unit="slice", dynamic_ncols=True,
+            bar_format="{desc} {percentage:3.0f}%|{bar}| {n}/{total} "
+                       "[ecoule {elapsed} - reste {remaining} - {rate_fmt}{postfix}]",
+        )
+    else:
+        bar = _Bar(len(files), None)
+
     t0 = time.perf_counter()
-    npl = nit = 0
+    npl = nit = done_bytes = 0
     with ProcessPoolExecutor(max_workers=workers, initializer=_init,
                              initargs=(args.out, args.level)) as ex:
-        for a, b in ex.map(convert_one, enumerate(files), chunksize=4):
+        for i, (a, b) in enumerate(ex.map(convert_one, enumerate(files), chunksize=4)):
             npl += a
             nit += b
+            done_bytes += sizes[i]
+            el = time.perf_counter() - t0
+            if tqdm:
+                bar.set_postfix_str(f"{done_bytes/1e6/el:.0f} Mo/s", refresh=False)
+                bar.update(1)
+            else:
+                bar.update(1, sizes[i])
+    bar.close()
     dt = time.perf_counter() - t0
 
     sz_pl = prefix_size(args.out, "playlists")

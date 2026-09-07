@@ -229,6 +229,7 @@ en bout (parse → colonnes → `pq.write_table` zstd). Sortie = **un seul dossi
 **~6–7× plus rapide** : pas de matérialisation intermédiaire, tout est parallèle
 (parse + écriture) sur les 11 cœurs. Légèrement plus gros (dictionnaires zstd par
 fichier, 2000 en-têtes). `--level` règle le niveau zstd (défaut 1), `--workers`
-le parallélisme. Lecture par glob (le dossier mélange 2 schémas) :
+le parallélisme. Barre de progression (temps écoulé / restant / débit) via `tqdm`,
+repli maison sinon, masquée hors terminal. Lecture par glob (le dossier mélange 2 schémas) :
 `read_parquet('db/parquet_arrow/playlist_tracks-*.parquet')` — DuckDB, pyarrow,
 polars, pandas. Round-trip vérifié (Beyoncé : 230 857 / 97 468).
