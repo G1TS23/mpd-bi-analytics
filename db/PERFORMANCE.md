@@ -42,6 +42,46 @@ Le surcoût de `_stg_playlist` (20 s vs 6 s de parse pur) = écriture disque + `
 
 ---
 
+## 2 bis. Temps de traitement par fichier
+
+`db/per_file_timing.py` mesure fichier par fichier (donc **sérialisé**, connexion
+en mémoire) le coût *parse JSON + `unnest(playlists)` + `unnest(tracks)`*.
+Données par fichier : `db/per_file_timing.csv` (1000 lignes).
+
+| Statistique (par fichier) | Valeur |
+|---|---:|
+| minimum | 354 ms |
+| **moyenne** | **395 ms** |
+| médiane | 389 ms |
+| p95 | 432 ms |
+| maximum | 1044 ms (1 valeur isolée) |
+| écart-type | 38 ms (≈ 10 %) |
+| débit | ~85 Mo/s par fichier |
+
+```
+350-375 ms  ▏████████████████                          177
+375-400 ms  ▏██████████████████████████████████████████ 575
+400-425 ms  ▏█████████████████                          187
+425-450 ms  ▏███                                         28
+450-500 ms  ▏█                                           15
+   >500 ms  ▏██                                          18
+```
+
+- **Distribution très resserrée** : les slices sont quasi-uniformes
+  (33,5 Mo ± 5 %, 66 346 pistes ± 5 %), donc les temps aussi.
+- **Le temps par fichier ne dépend quasiment pas du contenu** :
+  `corr(temps, taille) = 0,19`, `corr(temps, nb pistes) = 0,20`.
+  Il est dominé par le coût fixe d'amorçage du parseur JSON (ouverture, inférence
+  de schéma sur le fichier, allocation).
+- **Total sérialisé : 395 s** pour les 1000 fichiers. Le pipeline réel passe le
+  glob à un seul `read_json` qui **parallélise sur les 11 threads** → l'étape
+  `_stg_playlist` complète prend ~30 s (et non 395 s) : le coût marginal réel
+  d'un fichier est de l'ordre de **30 ms de temps mur**.
+- Les 8 fichiers les plus lents (565–1044 ms) ne se distinguent ni par la taille
+  ni par le nombre de pistes : ce sont des aléas d'ordonnancement / GC.
+
+---
+
 ## 3. Ce qui a été appliqué
 
 | Optimisation | Effet mesuré (échantillon 200) | Effet plein (33 Go) |
@@ -95,6 +135,9 @@ réduction du nombre de threads (défaut = 11 = optimal), `memory_limit` (RSS ~3
 .venv/bin/python db/bench_ingest.py -n 200 --tag baseline
 .venv/bin/python db/bench_ingest.py -n 200 --fast --tag fast
 .venv/bin/python db/bench_ingest.py -n 200 --fast --no-stg-item --tag fast_novue
+
+# temps de traitement fichier par fichier  ->  db/per_file_timing.csv
+.venv/bin/python db/per_file_timing.py
 
 # chargement réel instrumenté (2 lignes de résumé par phase)
 .venv/bin/python db/load_mpd.py            # optimisé + contraintes  (~7 min, 11 Go)
