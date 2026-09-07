@@ -19,6 +19,7 @@ questions analytiques ad hoc du type _« combien de fois apparaît Beyoncé dans
 | `db/PERFORMANCE.md` | Métriques d'ingestion (par étape, par fichier) et pistes d'optimisation |
 | `db/bench_ingest.py` | Banc d'essai reproductible de l'ingestion |
 | `db/per_file_timing.py` · `.csv` | Temps de traitement fichier par fichier |
+| `db/json_to_parquet.py` | Export JSON → dataset Parquet (`playlists` + `playlist_tracks`, ~2,5 min) |
 | `count_beyonce.py` | Script autonome : occurrences de Beyoncé + audit des orthographes |
 | `top_artists_beyonce_playlists.py` | Script autonome : artistes co-présents avec Beyoncé |
 | `CONTEXT.md` | Énoncé / pitch du projet |

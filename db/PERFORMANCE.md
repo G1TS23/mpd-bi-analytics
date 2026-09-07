@@ -128,12 +128,12 @@ structurels (§3).
 
 ## 4. Pistes restantes, par impact
 
-1. **Parsing JSON = plancher, désormais dominant** (~210 s à froid, ~135 s cache OS
+1. **Parsing JSON = plancher, désormais dominant** (~200 s à froid, ~130 s cache OS
    chaud, sur 34 Go). Une fois les FK retirées c'est ~70 % du temps.
-   → convertir une fois les slices en **Parquet** (`COPY (SELECT unnest(playlists)…)
-   TO 'stg.parquet'`) puis charger depuis Parquet : le parse retombe à ~2–3× plus
-   rapide. Rentable seulement si on recharge souvent (la conversion coûte ~un parse).
-   `read_json` parallélise déjà sur les 1000 fichiers ; le SSD est ~saturé en lecture.
+   → `db/json_to_parquet.py` matérialise le dataset en Parquet (voir §6) ; recharger
+   ensuite depuis Parquet parse ~2–3× plus vite. Rentable si on recharge souvent
+   (la conversion coûte elle-même ~un parse). `read_json` parallélise déjà sur les
+   1000 fichiers ; le SSD est ~saturé en lecture.
 
 2. **Clé de substitution `INTEGER` pour `playlist_track`** (étape schéma en étoile).
    66 M lignes de `VARCHAR(22)` → un `track_key INTEGER` diviserait la table de faits
@@ -165,4 +165,51 @@ structurels (§3).
 .venv/bin/python db/load_mpd.py            # défaut : PK seules      (~5 min, 5,2 Go)
 .venv/bin/python db/load_mpd.py --strict   # PK + FK imposées        (~7 min, 7 Go)
 .venv/bin/python db/load_mpd.py --fast     # aucune contrainte       (~3,5 min, 4,3 Go)
+
+# export Parquet (voir §6)
+.venv/bin/python db/json_to_parquet.py               # -> db/parquet/ (~2,5 min)
+.venv/bin/python db/json_to_parquet.py --bench -n 200
 ```
+
+---
+
+## 6. Export Parquet — `db/json_to_parquet.py`
+
+Convertit `data/*.json` en Parquet (via DuckDB) le plus vite possible.
+
+**Disposition : deux tables** (retenue) vs **une grosse table à plat** —
+départage sur échantillon 200 slices, `unnest` matérialisé dans une table :
+
+| Disposition | `unnest` | write (zstd) | Taille |
+|---|---:|---:|---:|
+| **two** : `playlists` + `playlist_tracks` | 9,7 s | 1,8 s | 524 Mo |
+| one : `mpd_flat` (colonnes playlist répétées) | 11,8 s | 2,5 s | 528 Mo |
+
+Parquet encode/dédoublonne si bien les colonnes répétées que **la taille est
+quasi identique** ; `two` est juste un peu plus rapide (rangées plus étroites) et
+plus propre (pas de redondance, jointure sur `pid`). → défaut = `two`.
+
+**Compression** : `zstd` = **2× plus petit que `snappy`** pour le même temps
+d'écriture → défaut `zstd`. `PER_THREAD_OUTPUT` (dossier de fichiers) : neutre en
+zstd, non retenu.
+
+**Piège mémoire** (corrigé) : garder la table `_sp` (playlists + pistes
+imbriquées, ~tout le dataset) en RAM pendant l'écriture fait spiller le writer
+Parquet → **write 61 s → 11 s** en faisant `DROP TABLE _sp` juste après l'`unnest`.
+De même, `unnest` **matérialisé** (CREATE TABLE) au lieu de streamé directement
+vers `COPY` : **250 s → 16 s** sur les 66 M lignes.
+
+**Plein dataset (34 Go JSON, cache chaud)** :
+
+| Étape | Temps |
+|---|---:|
+| parse JSON → `_sp` | 128 s |
+| `playlists.parquet` (1 M lignes, 14 Mo) | 0,1 s |
+| `unnest` → `_it` (66 M lignes) + `DROP _sp` | 16 s |
+| `playlist_tracks.parquet` (66 M lignes, 2,60 Go) | 11 s |
+| **TOTAL** | **~156 s** (~230 s cache froid) |
+
+Sortie : `db/parquet/playlists.parquet` (14 Mo) + `db/parquet/playlist_tracks.parquet`
+(2,60 Go) — **13× plus petit que le JSON**. Champs bruts (URI Spotify complètes,
+`modified_at` en epoch, `collaborative` en `'true'`/`'false'`) pour un export sans
+transformation. Round-trip vérifié (Beyoncé : 230 857 / 97 468).

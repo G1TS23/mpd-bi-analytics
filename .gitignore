@@ -2,12 +2,17 @@
 data/
 *.json.gz
 *.zip
+.env
 
 # --- Base(s) construites ---
 db/*.duckdb
 db/*.duckdb.wal
 *.sqlite
 *.db
+
+# --- Dataset Parquet genere ---
+db/parquet/
+*.parquet
 
 # --- Environnement Python ---
 .venv/
