@@ -9,6 +9,7 @@ Projet BI & Analytics — passage d'une archive JSON à un schéma relationnel i
 | MCD / MLD / MPD | ce document, §2 à §4 + `db/schema.sql` |
 | Diagrammes dbdiagram.io (DBML) | `db/schema.dbml` (relationnel) · `db/warehouse_star.dbml` (cible entrepôt) |
 | Script de transformation JSON → base | `db/load_mpd.py` + `db/build.sql` |
+| Métriques d'ingestion & perf | `db/PERFORMANCE.md` + `db/bench_ingest.py` |
 | Base construite | `db/mpd.duckdb` (DuckDB) |
 
 ---
@@ -239,6 +240,9 @@ Index :
 | `ix_track_album_uri` | `track(album_uri)` | « tracks d'un album » |
 | `ix_playlist_track_track_uri` | `playlist_track(track_uri)` | « playlists contenant ce track » |
 
+Les 3 index `ix_*` sont créés **après** le chargement (`db/build.sql` §7) : bâtir un
+index une fois sur table pleine est plus rapide que le maintenir à chaque `INSERT`.
+
 ### 4.1 Volumétrie chargée (contrôlée)
 
 | Table | Lignes |
@@ -248,6 +252,9 @@ Index :
 | `track` | 2 262 292 |
 | `playlist` | 1 000 000 |
 | `playlist_track` | 66 346 428 |
+
+Fichier `db/mpd.duckdb` : **~11 Go** (contraintes ON) — ~7 Go en `--fast`.
+Temps de chargement : **~7 min** (contraintes ON) — ~3 min en `--fast`. Détail : `db/PERFORMANCE.md`.
 
 Contrôles de cohérence exécutés en fin de chargement (`load_mpd.py`) — tous **OK** :
 `playlist.num_tracks` = `COUNT` réel ; intégrité référentielle
@@ -262,20 +269,22 @@ Contrôles de cohérence exécutés en fin de chargement (`load_mpd.py`) — tou
 python3 -m venv .venv
 .venv/bin/pip install duckdb
 
-# 2. construction complète  ->  db/mpd.duckdb   (~8 min, fichier ~19 Go)
+# 2. construction complète  ->  db/mpd.duckdb   (~7 min, fichier ~11 Go)
 .venv/bin/python db/load_mpd.py
 
 # variantes
-.venv/bin/python db/load_mpd.py -n 50          # 50 slices, pour itérer vite (~20 s)
-.venv/bin/python db/load_mpd.py --fast         # sans FK / PK composite : + rapide, fichier ~3-4 Go
+.venv/bin/python db/load_mpd.py -n 50          # 50 slices, pour itérer vite (~15 s)
+.venv/bin/python db/load_mpd.py --fast         # sans FK / PK composite : ~3 min, ~7 Go
 .venv/bin/python db/load_mpd.py --db /tmp/x.duckdb --data data
 ```
 
 Chaîne : `load_mpd.py` exécute `schema.sql` (structure) puis `build.sql` (ETL).
-`build.sql` lit les fichiers via `read_json()` (glob), déplie `playlists` puis
-`tracks` (`unnest(..., recursive := true)`), dérive les `*_uri` (id base62) par
+`build.sql` lit les fichiers via `read_json()` (glob, **parsé une seule fois** →
+table `_stg_playlist`), expose les pistes via une **vue** `_stg_item`
+(`unnest(..., recursive := true)`), dérive les `*_uri` (id base62) par
 `split_part(uri, ':', 3)`, alimente les dimensions en `INSERT … SELECT DISTINCT`,
-puis `playlist` et `playlist_track`, et supprime le staging.
+puis `playlist` et `playlist_track`, crée les index secondaires sur tables pleines,
+et supprime le staging. Métriques détaillées et pistes d'optimisation : **`db/PERFORMANCE.md`**.
 
 Requête interactive ensuite :
 

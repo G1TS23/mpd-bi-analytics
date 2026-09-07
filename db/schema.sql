@@ -76,8 +76,11 @@ CREATE TABLE playlist_track (
 
 -- ----------------------------------------------------------------
 --  Index analytiques  (les PRIMARY KEY / FOREIGN KEY portent deja
---  leur propre index cote DuckDB ; on ajoute les acces "inverses")
+--  leur propre index cote DuckDB ; on ajoute les acces "inverses").
+--  Crees APRES le chargement par db/build.sql (§7) : batir un index
+--  une fois sur table pleine est ~2x plus rapide que le maintenir
+--  a chaque INSERT.
 -- ----------------------------------------------------------------
-CREATE INDEX ix_track_artist_uri         ON track(artist_uri);
-CREATE INDEX ix_track_album_uri          ON track(album_uri);
-CREATE INDEX ix_playlist_track_track_uri ON playlist_track(track_uri);
+--  ix_track_artist_uri          ON track(artist_uri)
+--  ix_track_album_uri           ON track(album_uri)
+--  ix_playlist_track_track_uri  ON playlist_track(track_uri)
