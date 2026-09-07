@@ -1,0 +1,97 @@
+// =====================================================================
+//  Spotify Million Playlist Dataset — schéma relationnel (MLD / MPD)
+//  À coller sur https://dbdiagram.io  (langage DBML)
+//  Miroir de db/schema.sql — voir db/MODELE_DONNEES.md pour l'analyse
+// =====================================================================
+
+Project mpd {
+  database_type: 'DuckDB'
+  Note: '''
+    1 M playlists · 66,3 M lignes playlist_track · 2,26 M tracks
+    295 860 artistes · 734 684 albums
+    Clés primaires = identifiant base62 Spotify (partie après le dernier ":" de l'URI).
+  '''
+}
+
+// ------------------------------- Dimensions ---------------------------
+
+Table artist {
+  artist_id   varchar [pk, note: 'id base62 (22 c.) — URI = "spotify:artist:" || artist_id']
+  artist_name varchar [not null]
+
+  Note: 'FD vérifiée : artist_uri -> artist_name (0 incohérence / 66 M lignes)'
+}
+
+Table album {
+  album_id   varchar [pk, note: 'id base62 — URI = "spotify:album:" || album_id']
+  album_name varchar [not null]
+
+  Note: '''
+    FD vérifiée : album_uri -> album_name (0 incohérence).
+    Pas de FK vers artist : 38 235 albums sont multi-artistes (compilations).
+  '''
+}
+
+Table track {
+  track_id    varchar [pk, note: 'id base62 — URI = "spotify:track:" || track_id']
+  track_name  varchar [not null]
+  duration_ms integer [not null, note: 'durée de la piste']
+  artist_id   varchar [not null]
+  album_id    varchar [not null]
+
+  indexes {
+    artist_id [name: 'ix_track_artist']
+    album_id  [name: 'ix_track_album']
+  }
+
+  Note: 'FD vérifiée : track_uri -> (artist_uri, album_uri, track_name, duration_ms), 0 incohérence'
+}
+
+// --------------------------- Entité principale -----------------------
+
+Table playlist {
+  pid           integer [pk, note: 'identifiant global fourni par la source (0 .. 999 999)']
+  name          varchar [not null, note: 'non unique']
+  collaborative boolean [not null, note: "source 'true'/'false'"]
+  modified_at   date    [not null, note: 'source : epoch s UTC, granularité jour (2010-04-16 .. 2017-11-01)']
+  description   varchar [null, note: 'NULL si absente (~98 % des playlists)']
+  num_followers integer [not null]
+  num_edits     integer [not null]
+  num_tracks    integer [not null, note: 'agrégat conservé = COUNT(playlist_track)']
+  num_albums    integer [not null, note: 'agrégat conservé = COUNT(DISTINCT album)']
+  num_artists   integer [not null, note: 'agrégat conservé = COUNT(DISTINCT artist)']
+  duration_ms   bigint  [not null, note: 'agrégat conservé = SUM(track.duration_ms)']
+}
+
+// ------------------- Association playlist × track --------------------
+//  Entité faible : identification relative à playlist par "position".
+//  Un même track peut figurer plusieurs fois dans une playlist (881 652 cas)
+//  -> la clé doit inclure position, (pid, track_id) ne suffit pas.
+
+Table playlist_track {
+  pid      integer [not null]
+  position integer [not null, note: 'rang 0-indexé, dense (0 .. num_tracks-1)']
+  track_id varchar [not null]
+
+  indexes {
+    (pid, position) [pk]
+    track_id [name: 'ix_playlist_track_track']
+  }
+}
+
+// ------------------------------ Relations ---------------------------
+
+Ref: track.artist_id > artist.artist_id            // (0,n) — (1,1)
+Ref: track.album_id  > album.album_id              // (0,n) — (1,1)
+Ref: playlist_track.pid      > playlist.pid        // (1,n) — (1,1)
+Ref: playlist_track.track_id > track.track_id      // (0,n) — (1,1)
+
+TableGroup dimensions {
+  artist
+  album
+  track
+}
+TableGroup faits {
+  playlist
+  playlist_track
+}

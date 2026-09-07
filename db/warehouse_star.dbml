@@ -1,0 +1,92 @@
+// =====================================================================
+//  CIBLE ENTREPÔT — schéma en étoile (voir §7 de db/MODELE_DONNEES.md)
+//  Projection future du schéma relationnel db/schema.dbml.
+//  À coller sur https://dbdiagram.io  (langage DBML)
+// =====================================================================
+
+Project mpd_dwh {
+  database_type: 'DuckDB'
+  Note: '''
+    Grain de la table de faits : une piste à une position dans une playlist.
+    fact_playlist_track = 66,3 M lignes.
+  '''
+}
+
+// ------------------------------- Faits -------------------------------
+
+Table fact_playlist_track {
+  playlist_key integer [not null]
+  track_key    integer [not null]
+  artist_key   integer [not null, note: 'artiste principal du track (dénormalisé pour l’analyse)']
+  album_key    integer [not null]
+  date_key     integer [not null, note: 'date de dernière modif de la playlist']
+  position     integer [not null, note: 'rang 0-indexé dans la playlist']
+  duration_ms  integer [not null, note: 'mesure additive : durée de la piste']
+
+  indexes {
+    (playlist_key, position) [pk]
+    track_key  [name: 'ix_fpt_track']
+    artist_key [name: 'ix_fpt_artist']
+    album_key  [name: 'ix_fpt_album']
+    date_key   [name: 'ix_fpt_date']
+  }
+}
+
+// ---------------------------- Dimensions ----------------------------
+
+Table dim_playlist {
+  playlist_key  integer [pk, increment]
+  pid           integer [not null, unique, note: 'clé naturelle (source)']
+  name          varchar [not null]
+  collaborative boolean [not null]
+  description   varchar [null]
+  num_followers integer [not null]
+  num_edits     integer [not null]
+  num_tracks    integer [not null]
+  num_albums    integer [not null]
+  num_artists   integer [not null]
+  total_duration_ms bigint [not null]
+}
+
+Table dim_track {
+  track_key   integer [pk, increment]
+  track_id    varchar [not null, unique, note: 'clé naturelle : id base62 Spotify']
+  track_name  varchar [not null]
+  duration_ms integer [not null]
+}
+
+Table dim_artist {
+  artist_key  integer [pk, increment]
+  artist_id   varchar [not null, unique]
+  artist_name varchar [not null]
+}
+
+Table dim_album {
+  album_key  integer [pk, increment]
+  album_id   varchar [not null, unique]
+  album_name varchar [not null]
+}
+
+Table dim_date {
+  date_key     integer [pk, note: 'AAAAMMJJ']
+  full_date    date    [not null, unique]
+  year         integer [not null]
+  quarter      integer [not null]
+  month        integer [not null]
+  month_name   varchar [not null]
+  day          integer [not null]
+  day_of_week  integer [not null, note: '1 = lundi']
+  week_of_year integer [not null]
+}
+
+// ------------------------------ Relations --------------------------
+
+Ref: fact_playlist_track.playlist_key > dim_playlist.playlist_key
+Ref: fact_playlist_track.track_key    > dim_track.track_key
+Ref: fact_playlist_track.artist_key   > dim_artist.artist_key
+Ref: fact_playlist_track.album_key    > dim_album.album_key
+Ref: fact_playlist_track.date_key     > dim_date.date_key
+
+// Piste optionnelle si l'analyse par album multi-artistes devient utile :
+// Table bridge_album_artist { album_key integer [not null]; artist_key integer [not null];
+//   indexes { (album_key, artist_key) [pk] } }

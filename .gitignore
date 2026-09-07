@@ -1,0 +1,20 @@
+# --- Données sources (non redistribuables + ~31 Go) ---
+data/
+*.json.gz
+*.zip
+
+# --- Base(s) construites ---
+db/*.duckdb
+db/*.duckdb.wal
+*.sqlite
+*.db
+
+# --- Environnement Python ---
+.venv/
+__pycache__/
+*.pyc
+
+# --- Divers ---
+.DS_Store
+.idea/
+.ipynb_checkpoints/
