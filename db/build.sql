@@ -2,21 +2,25 @@
 --  ETL  Spotify Million Playlist Dataset  ->  schema relationnel
 --  A executer APRES db/schema.sql, sur la meme base DuckDB.
 --
---  Le jeton @SRC@ est remplace par db/load_mpd.py :
---    - chargement complet  : '<data>/mpd.slice.*.json'
---    - echantillon (-n N)  : ['<data>/mpd.slice.a.json', ...]
---  Pour lancer ce fichier a la main, remplacer @SRC@ par le glob.
+--  Jetons remplaces par db/load_mpd.py :
+--    @SRC@  source read_json  : '<data>/mpd.slice.*.json'  (ou liste ['..','..'])
+--    @STG@  base de staging   : '<db>.stg'  (fichier .duckdb jetable, attache)
+--  Pour lancer a la main : remplacer @SRC@ par le glob et @STG@ par un
+--  chemin temporaire (ex. '/tmp/mpd_stg.duckdb').
 --
 --  Choix perf (voir db/PERFORMANCE.md) :
---   - le JSON n'est parse qu'UNE fois -> table _stg_playlist (pistes
---     encore imbriquees) ;
---   - _stg_item est une VUE, pas une table : evite d'ecrire ~1 Go
---     (200 slices) / ~6 Go (tout) de staging intermediaire sur disque ;
---   - les index secondaires sont crees en fin de chargement (etape 7).
+--   - le JSON n'est parse qu'UNE fois -> table _stg_playlist ;
+--   - le staging vit dans une base ATTACHEE jetable, pas dans la base
+--     finale : celle-ci ne porte jamais l'espace mort du staging
+--     (DuckDB ne compacte pas apres DROP)  -> fichier final ~2x plus petit ;
+--   - _stg_item est une VUE (pas de 2e materialisation de 66 M lignes) ;
+--   - index secondaires crees en fin de chargement (etape 7).
 -- ================================================================
 
+ATTACH '@STG@' AS stg;
+
 -- 1. Staging : une ligne par playlist, pistes encore imbriquees ------
-CREATE OR REPLACE TABLE _stg_playlist AS
+CREATE OR REPLACE TABLE stg._stg_playlist AS
 SELECT pl.*
 FROM (
     SELECT unnest(playlists) AS pl
@@ -26,15 +30,12 @@ FROM (
 );
 
 -- 2. Vue : une ligne par piste de playlist (playlist x position) -----
---    Recalculee a chaque lecture (l'unnest depuis _stg_playlist deja
---    en base coute moins que materialiser+checkpointer 66 M lignes).
 CREATE OR REPLACE VIEW _stg_item AS
 SELECT pid, unnest(tracks, recursive := true)
-FROM _stg_playlist;
+FROM stg._stg_playlist;
 
 -- 3. Dimensions ------------------------------------------------------
 --    split_part(uri, ':', 3) = id base62 ('spotify:track:XXXX' -> 'XXXX').
---    Les colonnes *_uri de _stg_item portent l'URI complete.
 
 INSERT INTO artist
 SELECT DISTINCT split_part(artist_uri, ':', 3), artist_name
@@ -69,16 +70,16 @@ SELECT
     num_albums,
     num_artists,
     duration_ms
-FROM _stg_playlist;
+FROM stg._stg_playlist;
 
 -- 5. Association --------------------------------------------------
 INSERT INTO playlist_track
 SELECT pid, pos, split_part(track_uri, ':', 3)
 FROM _stg_item;
 
--- 6. Nettoyage staging ------------------------------------------
-DROP VIEW  _stg_item;
-DROP TABLE _stg_playlist;
+-- 6. Liberation du staging ------------------------------------
+DROP VIEW _stg_item;
+DETACH stg;                       -- le fichier @STG@ est supprime par load_mpd.py
 
 -- 7. Index secondaires (batis une fois sur tables pleines) ------
 CREATE INDEX ix_track_artist_uri         ON track(artist_uri);

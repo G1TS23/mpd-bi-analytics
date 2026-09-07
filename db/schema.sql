@@ -5,6 +5,13 @@
 --  Cles   : colonnes *_uri = identifiant base62 Spotify (partie apres
 --           le dernier ':' de l'URI). URI complete reconstructible :
 --           'spotify:<type>:' || <valeur>.
+--
+--  Ce fichier est la version STRICTE (PK + FK). db/load_mpd.py en
+--  derive :
+--    (defaut)  PK seules  -- retire les REFERENCES
+--    --fast    aucune     -- retire aussi la PRIMARY KEY composite
+--  L'integrite referentielle est de toute facon revalidee par requete
+--  en fin de chargement (voir db/load_mpd.py, db/PERFORMANCE.md).
 --  Genere / maintenu avec  db/load_mpd.py
 -- ================================================================
 

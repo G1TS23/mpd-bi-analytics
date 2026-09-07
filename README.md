@@ -36,13 +36,17 @@ et le placer dans `data/`.
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# Construction complète (~7 min, produit db/mpd.duckdb ~11 Go)
+# Construction complète — défaut : PK seules, FK revalidées après coup
+# (~5 min, produit db/mpd.duckdb ~5,2 Go)
 .venv/bin/python db/load_mpd.py
 
 # Itération rapide sur 50 slices
 .venv/bin/python db/load_mpd.py -n 50
 
-# Sans contraintes FK/PK composite (~3 min, fichier ~7 Go ; intégrité contrôlée après coup)
+# PK + FK imposées par le moteur (~7 min, ~7 Go)
+.venv/bin/python db/load_mpd.py --strict
+
+# Aucune contrainte (~3,5 min, ~4,3 Go)
 .venv/bin/python db/load_mpd.py --fast
 ```
 

@@ -213,10 +213,17 @@ Contraintes complémentaires :
 
 ## 4. MPD — Modèle Physique de Données (DuckDB)
 
-DDL complet et exécutable : **`db/schema.sql`**.
+DDL complet et exécutable : **`db/schema.sql`** (version stricte, PK + FK).
 Version dbdiagram.io (DBML) du même schéma : **`db/schema.dbml`** — à coller tel quel
 sur <https://dbdiagram.io> pour obtenir le diagramme entités-relations
 (export PNG/PDF/SQL disponible depuis le site).
+
+**Niveau de contraintes à la construction** (voir `db/PERFORMANCE.md`) : imposer les
+clés étrangères au moteur coûte ~40 % du temps de chargement et ~5 Go pour un
+bénéfice nul sur un entrepôt *immuable et reconstructible*. Par défaut `load_mpd.py`
+charge donc en **PK seules** et **revalide l'intégrité référentielle par requête**
+après coup (0 anomalie). `--strict` réimpose les FK ; `--fast` retire tout.
+Le modèle logique (§3) reste inchangé : ces FK existent conceptuellement.
 
 Résumé des choix physiques :
 
@@ -253,8 +260,9 @@ index une fois sur table pleine est plus rapide que le maintenir à chaque `INSE
 | `playlist` | 1 000 000 |
 | `playlist_track` | 66 346 428 |
 
-Fichier `db/mpd.duckdb` : **~11 Go** (contraintes ON) — ~7 Go en `--fast`.
-Temps de chargement : **~7 min** (contraintes ON) — ~3 min en `--fast`. Détail : `db/PERFORMANCE.md`.
+Fichier `db/mpd.duckdb` : **~5,2 Go** / chargement **~5 min** (mode par défaut : PK
+seules). `--strict` (PK + FK imposées) : ~7 Go / ~7 min ; `--fast` (aucune
+contrainte) : ~4,3 Go / ~3,5 min. Détail et analyse : `db/PERFORMANCE.md`.
 
 Contrôles de cohérence exécutés en fin de chargement (`load_mpd.py`) — tous **OK** :
 `playlist.num_tracks` = `COUNT` réel ; intégrité référentielle
@@ -269,12 +277,13 @@ Contrôles de cohérence exécutés en fin de chargement (`load_mpd.py`) — tou
 python3 -m venv .venv
 .venv/bin/pip install duckdb
 
-# 2. construction complète  ->  db/mpd.duckdb   (~7 min, fichier ~11 Go)
+# 2. construction complète  ->  db/mpd.duckdb   (défaut : PK seules, ~5 min, ~5,2 Go)
 .venv/bin/python db/load_mpd.py
 
 # variantes
 .venv/bin/python db/load_mpd.py -n 50          # 50 slices, pour itérer vite (~15 s)
-.venv/bin/python db/load_mpd.py --fast         # sans FK / PK composite : ~3 min, ~7 Go
+.venv/bin/python db/load_mpd.py --strict       # PK + FK imposées par le moteur (~7 min, ~7 Go)
+.venv/bin/python db/load_mpd.py --fast         # aucune contrainte (~3,5 min, ~4,3 Go)
 .venv/bin/python db/load_mpd.py --db /tmp/x.duckdb --data data
 ```
 

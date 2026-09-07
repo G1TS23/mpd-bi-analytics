@@ -6,11 +6,17 @@ Dataset (dossier ./data).
     schema.sql   -> structure (tables, cles, index)   [Modele Physique]
     build.sql    -> ETL (lecture JSON, remplissage)
 
+Niveaux de contraintes (voir db/PERFORMANCE.md) :
+    (defaut)   PK seules   -- FK retirees ; integrite verifiee apres chargement
+    --strict   PK + FK     -- le moteur refuse toute ligne orpheline
+    --fast     aucune      -- ni FK ni PK composite (le + rapide / petit)
+
 Usage :
-    python db/load_mpd.py                       # tout le dataset -> db/mpd.duckdb
+    python db/load_mpd.py                       # tout le dataset -> db/mpd.duckdb (PK seules)
     python db/load_mpd.py -n 50                 # 50 slices seulement (iteration rapide)
+    python db/load_mpd.py --strict             # PK + FK imposees par le moteur
+    python db/load_mpd.py --fast               # sans aucune contrainte
     python db/load_mpd.py --db /tmp/test.duckdb --data data
-    python db/load_mpd.py --fast               # sans FK ni PK composite (chargement + rapide)
 
 Pre-requis : le module python `duckdb`
     python3 -m venv .venv && .venv/bin/pip install duckdb
@@ -31,11 +37,15 @@ def human(n):
     return f"{n:,}".replace(",", " ")
 
 
-def strip_constraints(ddl: str) -> str:
-    """Retire FK et PK composite pour un chargement rapide (--fast)."""
-    ddl = re.sub(r"\s+REFERENCES\s+\w+\s*\([^)]*\)", "", ddl)
-    ddl = re.sub(r",\s*\n\s*PRIMARY KEY\s*\([^)]*\)", "", ddl)
-    return ddl
+def strip_fk(ddl: str) -> str:
+    """Retire les seules cles etrangeres (mode par defaut : PK conservees)."""
+    return re.sub(r"\s+REFERENCES\s+\w+\s*\([^)]*\)", "", ddl)
+
+
+def strip_all(ddl: str) -> str:
+    """Retire FK et PK composite (--fast)."""
+    ddl = strip_fk(ddl)
+    return re.sub(r",\s*\n\s*PRIMARY KEY\s*\([^)]*\)", "", ddl)
 
 
 def main():
@@ -45,7 +55,9 @@ def main():
     ap.add_argument("-n", "--sample", type=int, default=0, metavar="N", help="ne charger que les N premieres slices")
     ap.add_argument("--schema", default=os.path.join(HERE, "schema.sql"))
     ap.add_argument("--build", default=os.path.join(HERE, "build.sql"))
-    ap.add_argument("--fast", action="store_true", help="sans contraintes FK / PK composite")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--strict", action="store_true", help="PK + FK imposees par le moteur")
+    mode.add_argument("--fast", action="store_true", help="aucune contrainte (ni FK ni PK composite)")
     ap.add_argument("--keep", action="store_true", help="ne pas ecraser une base existante")
     args = ap.parse_args()
 
@@ -71,19 +83,27 @@ def main():
     else:
         src = "'" + os.path.join(args.data, "mpd.slice.*.json").replace("'", "''") + "'"
 
-    if os.path.exists(args.db):
-        if args.keep:
-            sys.exit(f"{args.db} existe deja (option --keep).")
-        os.remove(args.db)
+    stg_db = args.db + ".stg"
+    for p in (args.db, stg_db, stg_db + ".wal"):
+        if os.path.exists(p):
+            if p == args.db and args.keep:
+                sys.exit(f"{args.db} existe deja (option --keep).")
+            os.remove(p)
 
     schema_sql = open(args.schema, encoding="utf-8").read()
-    build_sql = open(args.build, encoding="utf-8").read().replace("@SRC@", src)
+    build_sql = (open(args.build, encoding="utf-8").read()
+                 .replace("@SRC@", src)
+                 .replace("@STG@", stg_db.replace("'", "''")))
     if args.fast:
-        schema_sql = strip_constraints(schema_sql)
+        schema_sql, mode = strip_all(schema_sql), "aucune (--fast)"
+    elif args.strict:
+        mode = "PK + FK (--strict)"
+    else:
+        schema_sql, mode = strip_fk(schema_sql), "PK seules (defaut)"
 
     print(f"Base      : {args.db}")
     print(f"Slices    : {len(files)} / {len(all_files)}")
-    print(f"Contraintes FK/PK composite : {'NON (--fast)' if args.fast else 'oui'}")
+    print(f"Contraintes : {mode}")
     print("-" * 60)
 
     con = duckdb.connect(args.db)
@@ -96,6 +116,9 @@ def main():
     t1 = time.perf_counter()
     con.execute(build_sql)
     print(f"[build ]  ETL terminee  ({time.perf_counter()-t1:.1f}s)")
+    for p in (stg_db, stg_db + ".wal"):
+        if os.path.exists(p):
+            os.remove(p)
 
     print("-" * 60)
     tables = ["artist", "album", "track", "playlist", "playlist_track"]
