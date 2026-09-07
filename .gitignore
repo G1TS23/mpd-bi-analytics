@@ -12,6 +12,7 @@ db/*.duckdb.wal
 
 # --- Dataset Parquet genere ---
 db/parquet/
+db/parquet_arrow/
 *.parquet
 
 # --- Environnement Python ---

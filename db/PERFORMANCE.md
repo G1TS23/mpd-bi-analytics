@@ -213,3 +213,21 @@ Sortie : `db/parquet/playlists.parquet` (14 Mo) + `db/parquet/playlist_tracks.pa
 (2,60 Go) — **13× plus petit que le JSON**. Champs bruts (URI Spotify complètes,
 `modified_at` en epoch, `collaborative` en `'true'`/`'false'`) pour un export sans
 transformation. Round-trip vérifié (Beyoncé : 230 857 / 97 468).
+
+### 6 bis. Variante sans DuckDB — `db/json_to_parquet_arrow.py` (**~28 s**)
+
+`orjson` + `pyarrow` + `multiprocessing` : chaque worker traite un fichier de bout
+en bout (parse → colonnes → `pq.write_table` zstd). Sortie = **dataset partitionné**
+(1 Parquet par slice) sous `db/parquet_arrow/playlists/` et `.../playlist_tracks/`.
+
+| | temps plein (34 Go) | taille | forme |
+|---|---:|---:|---|
+| `json_to_parquet.py` (DuckDB) | ~156 s | 2,60 Go | 2 fichiers uniques |
+| `json_to_parquet_arrow.py` | **27,8 s** (1,2 Go/s) | 2,77 Go | 2 × 1000 parts |
+
+**~5–6× plus rapide** : pas de matérialisation intermédiaire, tout est parallèle
+(parse + écriture) sur les 11 cœurs, et le format partitionné évite tout
+regroupement. Légèrement plus gros (dictionnaires par fichier, 1000 en-têtes).
+`--level` règle le niveau zstd (défaut 1). Lisible tel quel par pyarrow.dataset,
+polars, pandas, ou DuckDB (`read_parquet('db/parquet_arrow/playlist_tracks/*.parquet')`).
+Round-trip vérifié (Beyoncé : 230 857 / 97 468).
