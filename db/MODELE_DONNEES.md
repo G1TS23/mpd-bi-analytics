@@ -90,8 +90,9 @@ Archive de **1000 fichiers** `data/mpd.slice.<a>-<b>.json`. Chaque fichier :
 ### 1.5 Décisions de modélisation
 
 1. **4 entités** : `PLAYLIST`, `TRACK`, `ARTIST`, `ALBUM` — toutes identifiées par leur URI Spotify.
-2. **Clés primaires = identifiant base62 court** (22 caractères, partie après le dernier `:` de l'URI).
-   L'URI complète reste reconstructible : `'spotify:track:' || track_id`.
+2. **Clés primaires = identifiant base62 court** (22 caractères, partie après le dernier `:` de l'URI),
+   dans des colonnes nommées `*_uri` (`artist_uri`, `album_uri`, `track_uri`) — mêmes noms que
+   les champs de la source. L'URI complète reste reconstructible : `'spotify:track:' || track_uri`.
 3. **Association `PLAYLIST_TRACK`** portant `position`, identifiée par `(pid, position)`
    (entité faible : identification relative à `PLAYLIST`).
 4. **ALBUM sans FK artiste** (compilations) — la relation artiste ↔ album se déduit via `TRACK`.
@@ -114,19 +115,19 @@ erDiagram
     TRACK    ||--o{ PLAYLIST_TRACK : "REFERENCE"
 
     ARTIST {
-        varchar artist_id   PK
+        varchar artist_uri   PK
         varchar artist_name
     }
     ALBUM {
-        varchar album_id    PK
+        varchar album_uri    PK
         varchar album_name
     }
     TRACK {
-        varchar track_id    PK
+        varchar track_uri    PK
         varchar track_name
         integer duration_ms
-        varchar artist_id   FK
-        varchar album_id    FK
+        varchar artist_uri   FK
+        varchar album_uri    FK
     }
     PLAYLIST {
         integer pid           PK
@@ -144,7 +145,7 @@ erDiagram
     PLAYLIST_TRACK {
         integer pid        PK,FK
         integer position   PK
-        varchar track_id   FK
+        varchar track_uri   FK
     }
 ```
 
@@ -180,25 +181,25 @@ PLAYLIST (1,n) ──< APPARTIENT (1,1) ── PLAYLIST_TRACK ── (1,1) REFER
 Notation : `PK` souligné conceptuellement, `#` = clé étrangère.
 
 ```
-ARTIST (artist_id, artist_name)
-    PK (artist_id)
+ARTIST (artist_uri, artist_name)
+    PK (artist_uri)
 
-ALBUM (album_id, album_name)
-    PK (album_id)
+ALBUM (album_uri, album_name)
+    PK (album_uri)
 
-TRACK (track_id, track_name, duration_ms, #artist_id, #album_id)
-    PK (track_id)
-    FK (artist_id) → ARTIST(artist_id)
-    FK (album_id)  → ALBUM(album_id)
+TRACK (track_uri, track_name, duration_ms, #artist_uri, #album_uri)
+    PK (track_uri)
+    FK (artist_uri) → ARTIST(artist_uri)
+    FK (album_uri)  → ALBUM(album_uri)
 
 PLAYLIST (pid, name, collaborative, modified_at, description,
           num_followers, num_edits, num_tracks, num_albums, num_artists, duration_ms)
     PK (pid)
 
-PLAYLIST_TRACK (#pid, position, #track_id)
+PLAYLIST_TRACK (#pid, position, #track_uri)
     PK (pid, position)
     FK (pid)      → PLAYLIST(pid)
-    FK (track_id) → TRACK(track_id)
+    FK (track_uri) → TRACK(track_uri)
 ```
 
 Contraintes complémentaires :
@@ -220,7 +221,7 @@ Résumé des choix physiques :
 
 | Élément logique | Type DuckDB | Justification |
 |---|---|---|
-| `*_id` (artist/album/track) | `VARCHAR` | id base62 Spotify, 22 caractères |
+| `*_uri` (artist/album/track) | `VARCHAR` | id base62 Spotify, 22 caractères |
 | `pid`, `position`, `num_*` | `INTEGER` | valeurs ≤ 10⁶ |
 | `track.duration_ms` | `INTEGER` | une piste : < 2,1 × 10⁹ ms |
 | `playlist.duration_ms` | `BIGINT` | somme sur une playlist, marge de sécurité |
@@ -232,11 +233,11 @@ Index :
 
 | Index | Colonnes | Usage |
 |---|---|---|
-| *(PK)* `artist` / `album` / `track` / `playlist` | `*_id` / `pid` | jointures, unicité |
+| *(PK)* `artist` / `album` / `track` / `playlist` | `*_uri` / `pid` | jointures, unicité |
 | *(PK)* `playlist_track` | `(pid, position)` | ordre des pistes, unicité |
-| `ix_track_artist` | `track(artist_id)` | « tracks d'un artiste » |
-| `ix_track_album` | `track(album_id)` | « tracks d'un album » |
-| `ix_playlist_track_track` | `playlist_track(track_id)` | « playlists contenant ce track » |
+| `ix_track_artist_uri` | `track(artist_uri)` | « tracks d'un artiste » |
+| `ix_track_album_uri` | `track(album_uri)` | « tracks d'un album » |
+| `ix_playlist_track_track_uri` | `playlist_track(track_uri)` | « playlists contenant ce track » |
 
 ### 4.1 Volumétrie chargée (contrôlée)
 
@@ -272,7 +273,7 @@ python3 -m venv .venv
 
 Chaîne : `load_mpd.py` exécute `schema.sql` (structure) puis `build.sql` (ETL).
 `build.sql` lit les fichiers via `read_json()` (glob), déplie `playlists` puis
-`tracks` (`unnest(..., recursive := true)`), dérive les `*_id` par
+`tracks` (`unnest(..., recursive := true)`), dérive les `*_uri` (id base62) par
 `split_part(uri, ':', 3)`, alimente les dimensions en `INSERT … SELECT DISTINCT`,
 puis `playlist` et `playlist_track`, et supprime le staging.
 
@@ -291,25 +292,25 @@ Requête interactive ensuite :
 ```sql
 -- 6.1  Combien de fois apparaît Beyoncé dans les playlists ? (feat exclus,
 --      c.-à-d. Beyoncé = artiste principal)   -> 230 857 / 97 468
-WITH b AS (SELECT track_id FROM track WHERE artist_id = '6vWDO969PvNqNYHIOW5v0m')
+WITH b AS (SELECT track_uri FROM track WHERE artist_uri = '6vWDO969PvNqNYHIOW5v0m')
 SELECT count(*)               AS occurrences,
        count(DISTINCT pid)    AS playlists
-FROM playlist_track WHERE track_id IN (SELECT track_id FROM b);
+FROM playlist_track WHERE track_uri IN (SELECT track_uri FROM b);
 
 -- 6.2  Top 3 des artistes présents dans les playlists où figure Beyoncé
 WITH bp AS (
     SELECT DISTINCT pt.pid
-    FROM playlist_track pt JOIN track t USING (track_id)
-    WHERE t.artist_id = '6vWDO969PvNqNYHIOW5v0m'
+    FROM playlist_track pt JOIN track t USING (track_uri)
+    WHERE t.artist_uri = '6vWDO969PvNqNYHIOW5v0m'
 )
 SELECT a.artist_name,
        count(DISTINCT pt.pid) AS playlists,
        count(*)               AS occurrences
 FROM playlist_track pt
 JOIN bp USING (pid)
-JOIN track  t ON t.track_id = pt.track_id
-JOIN artist a ON a.artist_id = t.artist_id
-WHERE a.artist_id <> '6vWDO969PvNqNYHIOW5v0m'
+JOIN track  t ON t.track_uri = pt.track_uri
+JOIN artist a ON a.artist_uri = t.artist_uri
+WHERE a.artist_uri <> '6vWDO969PvNqNYHIOW5v0m'
 GROUP BY a.artist_name
 ORDER BY playlists DESC
 LIMIT 3;                        -- Rihanna, Drake, Kanye West
@@ -319,8 +320,8 @@ SELECT a.artist_name,
        count(DISTINCT pt.pid) AS playlists,
        count(*)               AS occurrences
 FROM playlist_track pt
-JOIN track  t ON t.track_id  = pt.track_id
-JOIN artist a ON a.artist_id = t.artist_id
+JOIN track  t ON t.track_uri  = pt.track_uri
+JOIN artist a ON a.artist_uri = t.artist_uri
 GROUP BY a.artist_name
 ORDER BY playlists DESC
 LIMIT 20;
@@ -328,8 +329,8 @@ LIMIT 20;
 -- 6.4  Titres les plus « playlistés »
 SELECT t.track_name, a.artist_name, count(*) AS n
 FROM playlist_track pt
-JOIN track  t ON t.track_id  = pt.track_id
-JOIN artist a ON a.artist_id = t.artist_id
+JOIN track  t ON t.track_uri  = pt.track_uri
+JOIN artist a ON a.artist_uri = t.artist_uri
 GROUP BY t.track_name, a.artist_name
 ORDER BY n DESC
 LIMIT 20;
@@ -347,8 +348,8 @@ GROUP BY palier_min
 ORDER BY palier_min;
 
 -- 6.7  Artistes ayant le plus d'albums référencés
-SELECT a.artist_name, count(DISTINCT t.album_id) AS albums
-FROM track t JOIN artist a USING (artist_id)
+SELECT a.artist_name, count(DISTINCT t.album_uri) AS albums
+FROM track t JOIN artist a USING (artist_uri)
 GROUP BY a.artist_name ORDER BY albums DESC LIMIT 20;
 
 -- 6.8  Playlists « workout » et leur durée moyenne

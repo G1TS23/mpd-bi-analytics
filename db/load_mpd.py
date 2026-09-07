@@ -110,23 +110,23 @@ def main():
         SELECT
           (SELECT count(*) FROM playlist WHERE num_tracks <>
               (SELECT count(*) FROM playlist_track pt WHERE pt.pid = playlist.pid)) AS num_tracks_ko,
-          (SELECT count(*) FROM playlist_track pt LEFT JOIN track t USING(track_id) WHERE t.track_id IS NULL) AS fk_track_ko,
-          (SELECT count(*) FROM track t LEFT JOIN artist a USING(artist_id) WHERE a.artist_id IS NULL) AS fk_artist_ko,
-          (SELECT count(*) FROM track t LEFT JOIN album  al USING(album_id)  WHERE al.album_id IS NULL) AS fk_album_ko
+          (SELECT count(*) FROM playlist_track pt LEFT JOIN track t USING(track_uri) WHERE t.track_uri IS NULL) AS fk_track_ko,
+          (SELECT count(*) FROM track t LEFT JOIN artist a USING(artist_uri) WHERE a.artist_uri IS NULL) AS fk_artist_ko,
+          (SELECT count(*) FROM track t LEFT JOIN album  al USING(album_uri)  WHERE al.album_uri IS NULL) AS fk_album_ko
         """
     ).fetchone()
-    labels = ["playlist.num_tracks == COUNT reel", "playlist_track.track_id -> track",
-              "track.artist_id -> artist", "track.album_id -> album"]
+    labels = ["playlist.num_tracks == COUNT reel", "playlist_track.track_uri -> track",
+              "track.artist_uri -> artist", "track.album_uri -> album"]
     for lab, v in zip(labels, checks):
         print(f"  [{'OK ' if v == 0 else 'KO '}] {lab}" + ("" if v == 0 else f"  ({v} anomalies)"))
 
     # Clin d'oeil : on retrouve les chiffres Beyonce
     bey = con.execute(
         """
-        WITH b AS (SELECT track_id FROM track WHERE artist_id = '6vWDO969PvNqNYHIOW5v0m')
+        WITH b AS (SELECT track_uri FROM track WHERE artist_uri = '6vWDO969PvNqNYHIOW5v0m')
         SELECT
-          (SELECT count(*) FROM playlist_track WHERE track_id IN (SELECT track_id FROM b)) AS occurrences,
-          (SELECT count(DISTINCT pid) FROM playlist_track WHERE track_id IN (SELECT track_id FROM b)) AS playlists
+          (SELECT count(*) FROM playlist_track WHERE track_uri IN (SELECT track_uri FROM b)) AS occurrences,
+          (SELECT count(DISTINCT pid) FROM playlist_track WHERE track_uri IN (SELECT track_uri FROM b)) AS playlists
         """
     ).fetchone()
     print("-" * 60)

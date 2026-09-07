@@ -1,7 +1,10 @@
 -- ================================================================
 --  MPD - Modele Physique de Donnees  (cible : DuckDB >= 1.0)
 --  Source : Spotify Million Playlist Dataset (dossier ./data)
---  Forme  : schema relationnel normalise (3NF), cles = id base62 Spotify
+--  Forme  : schema relationnel normalise (3NF)
+--  Cles   : colonnes *_uri = identifiant base62 Spotify (partie apres
+--           le dernier ':' de l'URI). URI complete reconstructible :
+--           'spotify:<type>:' || <valeur>.
 --  Genere / maintenu avec  db/load_mpd.py
 -- ================================================================
 
@@ -18,25 +21,25 @@ DROP TABLE IF EXISTS artist;
 
 -- Un artiste (principal). FD verifiee : artist_uri -> artist_name (0 incoherence / 66 M lignes)
 CREATE TABLE artist (
-    artist_id    VARCHAR PRIMARY KEY,      -- id base62 (22 c.), URI = 'spotify:artist:' || artist_id
+    artist_uri   VARCHAR PRIMARY KEY,      -- id base62 (22 c.) ; URI = 'spotify:artist:' || artist_uri
     artist_name  VARCHAR NOT NULL
 );
 
 -- Un album / single. FD verifiee : album_uri -> album_name (0 incoherence)
 -- Pas de FK vers artist : 38 235 albums sont multi-artistes (compilations).
 CREATE TABLE album (
-    album_id     VARCHAR PRIMARY KEY,
+    album_uri    VARCHAR PRIMARY KEY,      -- URI = 'spotify:album:' || album_uri
     album_name   VARCHAR NOT NULL
 );
 
 -- Un enregistrement precis (une piste sur une sortie donnee).
 -- FD verifiee : track_uri -> (artist_uri, album_uri, track_name, duration_ms), 0 incoherence.
 CREATE TABLE track (
-    track_id     VARCHAR PRIMARY KEY,
+    track_uri    VARCHAR PRIMARY KEY,      -- URI = 'spotify:track:' || track_uri
     track_name   VARCHAR NOT NULL,
     duration_ms  INTEGER NOT NULL,        -- duree de la piste
-    artist_id    VARCHAR NOT NULL REFERENCES artist(artist_id),
-    album_id     VARCHAR NOT NULL REFERENCES album(album_id)
+    artist_uri   VARCHAR NOT NULL REFERENCES artist(artist_uri),
+    album_uri    VARCHAR NOT NULL REFERENCES album(album_uri)
 );
 
 -- ----------------------------------------------------------------
@@ -67,7 +70,7 @@ CREATE TABLE playlist (
 CREATE TABLE playlist_track (
     pid        INTEGER NOT NULL REFERENCES playlist(pid),
     position   INTEGER NOT NULL,            -- rang 0-indexe, dense (0 .. num_tracks-1)
-    track_id   VARCHAR NOT NULL REFERENCES track(track_id),
+    track_uri  VARCHAR NOT NULL REFERENCES track(track_uri),
     PRIMARY KEY (pid, position)
 );
 
@@ -75,6 +78,6 @@ CREATE TABLE playlist_track (
 --  Index analytiques  (les PRIMARY KEY / FOREIGN KEY portent deja
 --  leur propre index cote DuckDB ; on ajoute les acces "inverses")
 -- ----------------------------------------------------------------
-CREATE INDEX ix_track_artist          ON track(artist_id);
-CREATE INDEX ix_track_album           ON track(album_id);
-CREATE INDEX ix_playlist_track_track  ON playlist_track(track_id);
+CREATE INDEX ix_track_artist_uri         ON track(artist_uri);
+CREATE INDEX ix_track_album_uri          ON track(album_uri);
+CREATE INDEX ix_playlist_track_track_uri ON playlist_track(track_uri);

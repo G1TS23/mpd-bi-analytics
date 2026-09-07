@@ -35,7 +35,9 @@ SELECT DISTINCT split_part(album_uri, ':', 3), album_name
 FROM _stg_item;
 
 -- FD garantie (verifiee a l'analyse) => DISTINCT sur les 5 colonnes
--- produit exactement une ligne par track_id.
+-- produit exactement une ligne par track_uri.
+-- NB : les colonnes *_uri de _stg_item portent l'URI complete ('spotify:...:xxx') ;
+-- split_part(.,':',3) en extrait l'id base62 stocke dans les tables cibles.
 INSERT INTO track
 SELECT DISTINCT
        split_part(track_uri,  ':', 3),

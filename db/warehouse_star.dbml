@@ -50,20 +50,20 @@ Table dim_playlist {
 
 Table dim_track {
   track_key   integer [pk, increment]
-  track_id    varchar [not null, unique, note: 'clé naturelle : id base62 Spotify']
+  track_uri   varchar [not null, unique, note: 'clé naturelle : id base62 Spotify']
   track_name  varchar [not null]
   duration_ms integer [not null]
 }
 
 Table dim_artist {
   artist_key  integer [pk, increment]
-  artist_id   varchar [not null, unique]
+  artist_uri  varchar [not null, unique]
   artist_name varchar [not null]
 }
 
 Table dim_album {
   album_key  integer [pk, increment]
-  album_id   varchar [not null, unique]
+  album_uri  varchar [not null, unique]
   album_name varchar [not null]
 }
 

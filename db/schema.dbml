@@ -9,21 +9,22 @@ Project mpd {
   Note: '''
     1 M playlists · 66,3 M lignes playlist_track · 2,26 M tracks
     295 860 artistes · 734 684 albums
-    Clés primaires = identifiant base62 Spotify (partie après le dernier ":" de l'URI).
+    Colonnes *_uri : identifiant base62 Spotify (partie après le dernier ":" de l'URI).
+    URI complète reconstructible : "spotify:<type>:" || valeur.
   '''
 }
 
 // ------------------------------- Dimensions ---------------------------
 
 Table artist {
-  artist_id   varchar [pk, note: 'id base62 (22 c.) — URI = "spotify:artist:" || artist_id']
+  artist_uri  varchar [pk, note: 'id base62 (22 c.) — URI = "spotify:artist:" || artist_uri']
   artist_name varchar [not null]
 
   Note: 'FD vérifiée : artist_uri -> artist_name (0 incohérence / 66 M lignes)'
 }
 
 Table album {
-  album_id   varchar [pk, note: 'id base62 — URI = "spotify:album:" || album_id']
+  album_uri  varchar [pk, note: 'id base62 — URI = "spotify:album:" || album_uri']
   album_name varchar [not null]
 
   Note: '''
@@ -33,15 +34,15 @@ Table album {
 }
 
 Table track {
-  track_id    varchar [pk, note: 'id base62 — URI = "spotify:track:" || track_id']
+  track_uri   varchar [pk, note: 'id base62 — URI = "spotify:track:" || track_uri']
   track_name  varchar [not null]
   duration_ms integer [not null, note: 'durée de la piste']
-  artist_id   varchar [not null]
-  album_id    varchar [not null]
+  artist_uri  varchar [not null]
+  album_uri   varchar [not null]
 
   indexes {
-    artist_id [name: 'ix_track_artist']
-    album_id  [name: 'ix_track_album']
+    artist_uri [name: 'ix_track_artist_uri']
+    album_uri  [name: 'ix_track_album_uri']
   }
 
   Note: 'FD vérifiée : track_uri -> (artist_uri, album_uri, track_name, duration_ms), 0 incohérence'
@@ -66,25 +67,25 @@ Table playlist {
 // ------------------- Association playlist × track --------------------
 //  Entité faible : identification relative à playlist par "position".
 //  Un même track peut figurer plusieurs fois dans une playlist (881 652 cas)
-//  -> la clé doit inclure position, (pid, track_id) ne suffit pas.
+//  -> la clé doit inclure position, (pid, track_uri) ne suffit pas.
 
 Table playlist_track {
-  pid      integer [not null]
-  position integer [not null, note: 'rang 0-indexé, dense (0 .. num_tracks-1)']
-  track_id varchar [not null]
+  pid       integer [not null]
+  position  integer [not null, note: 'rang 0-indexé, dense (0 .. num_tracks-1)']
+  track_uri varchar [not null]
 
   indexes {
     (pid, position) [pk]
-    track_id [name: 'ix_playlist_track_track']
+    track_uri [name: 'ix_playlist_track_track_uri']
   }
 }
 
 // ------------------------------ Relations ---------------------------
 
-Ref: track.artist_id > artist.artist_id            // (0,n) — (1,1)
-Ref: track.album_id  > album.album_id              // (0,n) — (1,1)
-Ref: playlist_track.pid      > playlist.pid        // (1,n) — (1,1)
-Ref: playlist_track.track_id > track.track_id      // (0,n) — (1,1)
+Ref: track.artist_uri > artist.artist_uri            // (0,n) — (1,1)
+Ref: track.album_uri  > album.album_uri              // (0,n) — (1,1)
+Ref: playlist_track.pid       > playlist.pid         // (1,n) — (1,1)
+Ref: playlist_track.track_uri > track.track_uri      // (0,n) — (1,1)
 
 TableGroup dimensions {
   artist
