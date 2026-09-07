@@ -214,20 +214,21 @@ Sortie : `db/parquet/playlists.parquet` (14 Mo) + `db/parquet/playlist_tracks.pa
 `modified_at` en epoch, `collaborative` en `'true'`/`'false'`) pour un export sans
 transformation. Round-trip vérifié (Beyoncé : 230 857 / 97 468).
 
-### 6 bis. Variante sans DuckDB — `db/json_to_parquet_arrow.py` (**~28 s**)
+### 6 bis. Variante sans DuckDB — `db/json_to_parquet_arrow.py` (**~23 s**)
 
 `orjson` + `pyarrow` + `multiprocessing` : chaque worker traite un fichier de bout
-en bout (parse → colonnes → `pq.write_table` zstd). Sortie = **dataset partitionné**
-(1 Parquet par slice) sous `db/parquet_arrow/playlists/` et `.../playlist_tracks/`.
+en bout (parse → colonnes → `pq.write_table` zstd). Sortie = **un seul dossier**
+`db/parquet_arrow/`, le préfixe du nom distingue les deux tables :
+`playlists-XXXX.parquet` et `playlist_tracks-XXXX.parquet` (1 fichier par slice).
 
 | | temps plein (34 Go) | taille | forme |
 |---|---:|---:|---|
 | `json_to_parquet.py` (DuckDB) | ~156 s | 2,60 Go | 2 fichiers uniques |
-| `json_to_parquet_arrow.py` | **27,8 s** (1,2 Go/s) | 2,77 Go | 2 × 1000 parts |
+| `json_to_parquet_arrow.py` | **~23 s** (1,5 Go/s) | 2,77 Go | 1 dossier, 2×1000 parts |
 
-**~5–6× plus rapide** : pas de matérialisation intermédiaire, tout est parallèle
-(parse + écriture) sur les 11 cœurs, et le format partitionné évite tout
-regroupement. Légèrement plus gros (dictionnaires par fichier, 1000 en-têtes).
-`--level` règle le niveau zstd (défaut 1). Lisible tel quel par pyarrow.dataset,
-polars, pandas, ou DuckDB (`read_parquet('db/parquet_arrow/playlist_tracks/*.parquet')`).
-Round-trip vérifié (Beyoncé : 230 857 / 97 468).
+**~6–7× plus rapide** : pas de matérialisation intermédiaire, tout est parallèle
+(parse + écriture) sur les 11 cœurs. Légèrement plus gros (dictionnaires zstd par
+fichier, 2000 en-têtes). `--level` règle le niveau zstd (défaut 1), `--workers`
+le parallélisme. Lecture par glob (le dossier mélange 2 schémas) :
+`read_parquet('db/parquet_arrow/playlist_tracks-*.parquet')` — DuckDB, pyarrow,
+polars, pandas. Round-trip vérifié (Beyoncé : 230 857 / 97 468).

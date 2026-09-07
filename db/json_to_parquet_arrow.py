@@ -3,14 +3,14 @@
 Export JSON -> Parquet (zstd) SANS DuckDB : orjson + pyarrow + multiprocessing.
 
 Chaque worker traite un fichier `mpd.slice.*.json` de bout en bout (parse,
-construction des colonnes, ecriture Parquet). Sortie = un *dataset partitionne*
-(un fichier Parquet par slice) :
+construction des colonnes, ecriture Parquet). Sortie = un seul dossier, le
+prefixe du nom de fichier distingue les deux tables (un fichier par slice) :
 
-    <out>/playlists/part-XXXX.parquet          1 ligne / playlist
-    <out>/playlist_tracks/part-XXXX.parquet    1 ligne / (playlist, position)
+    <out>/playlists-XXXX.parquet          1 ligne / playlist
+    <out>/playlist_tracks-XXXX.parquet    1 ligne / (playlist, position)
 
 Lecture ensuite : pyarrow.dataset, pandas, polars, DuckDB (`read_parquet(
-'<out>/playlist_tracks/*.parquet')`), Spark...
+'<out>/playlist_tracks-*.parquet')`), Spark...
 
     python db/json_to_parquet_arrow.py                 # -> db/parquet_arrow/
     python db/json_to_parquet_arrow.py --out /tmp/pq --workers 8 --level 1
@@ -114,14 +114,14 @@ def convert_one(arg):
         schema=ITEM_SCHEMA,
     )
     kw = dict(compression="zstd", compression_level=level)
-    pq.write_table(pl_tbl, f"{out}/playlists/part-{idx:04d}.parquet", **kw)
-    pq.write_table(it_tbl, f"{out}/playlist_tracks/part-{idx:04d}.parquet", **kw)
+    pq.write_table(pl_tbl, f"{out}/playlists-{idx:04d}.parquet", **kw)
+    pq.write_table(it_tbl, f"{out}/playlist_tracks-{idx:04d}.parquet", **kw)
     return len(p_pid), len(t_pid)
 
 
-def dir_size(p):
-    return sum(os.path.getsize(os.path.join(r, f))
-              for r, _, fs in os.walk(p) for f in fs)
+def prefix_size(out, prefix):
+    return sum(os.path.getsize(os.path.join(out, f)) for f in os.listdir(out)
+               if f.startswith(prefix + "-") and f.endswith(".parquet"))
 
 
 def main():
@@ -141,8 +141,7 @@ def main():
     bytes_in = sum(os.path.getsize(f) for f in files)
     workers = args.workers or os.cpu_count() or 4
 
-    for sub in ("playlists", "playlist_tracks"):
-        os.makedirs(os.path.join(args.out, sub), exist_ok=True)
+    os.makedirs(args.out, exist_ok=True)
 
     print(f"{len(files)} slices | {bytes_in/1e9:.1f} Go JSON | {workers} workers | "
           f"zstd niveau {args.level} | parseur {_j.__name__}")
@@ -155,11 +154,11 @@ def main():
             nit += b
     dt = time.perf_counter() - t0
 
-    sz_pl = dir_size(os.path.join(args.out, "playlists"))
-    sz_it = dir_size(os.path.join(args.out, "playlist_tracks"))
+    sz_pl = prefix_size(args.out, "playlists")
+    sz_it = prefix_size(args.out, "playlist_tracks")
     print("-" * 60)
-    print(f"playlists       : {npl:>10} lignes  {sz_pl/1e6:8.0f} Mo")
-    print(f"playlist_tracks : {nit:>10} lignes  {sz_it/1e9:8.2f} Go")
+    print(f"playlists-*.parquet       : {npl:>10} lignes  {sz_pl/1e6:8.0f} Mo")
+    print(f"playlist_tracks-*.parquet : {nit:>10} lignes  {sz_it/1e9:8.2f} Go")
     print(f"TOTAL {dt:.1f} s  ({bytes_in/1e6/dt:.0f} Mo/s JSON)  -> {args.out}/")
 
 

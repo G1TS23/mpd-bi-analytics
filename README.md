@@ -20,7 +20,7 @@ questions analytiques ad hoc du type _« combien de fois apparaît Beyoncé dans
 | `db/bench_ingest.py` | Banc d'essai reproductible de l'ingestion |
 | `db/per_file_timing.py` · `.csv` | Temps de traitement fichier par fichier |
 | `db/json_to_parquet.py` | Export JSON → Parquet via DuckDB (`playlists` + `playlist_tracks`, ~2,5 min) |
-| `db/json_to_parquet_arrow.py` | Idem sans DuckDB (orjson + pyarrow + multiprocessing, **~28 s**, dataset partitionné) |
+| `db/json_to_parquet_arrow.py` | Idem sans DuckDB (orjson + pyarrow + multiprocessing, **~23 s**, 1 dossier, préfixe = table) |
 | `count_beyonce.py` | Script autonome : occurrences de Beyoncé + audit des orthographes |
 | `top_artists_beyonce_playlists.py` | Script autonome : artistes co-présents avec Beyoncé |
 | `CONTEXT.md` | Énoncé / pitch du projet |
